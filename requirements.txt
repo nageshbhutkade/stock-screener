@@ -1,0 +1,27 @@
+# Core
+yfinance>=0.2.36
+pandas>=2.0.0
+numpy>=1.24.0
+python-dotenv>=1.0.0
+
+# APIs & Data
+requests>=2.31.0
+finnhub-python>=2.4.18
+
+# Database
+supabase>=1.2.0
+
+# Technical Analysis
+ta>=0.10.2
+
+# Web/Dashboard
+streamlit>=1.28.0
+plotly>=5.17.0
+
+# PDF Reports
+fpdf2>=2.7.5
+
+# Scheduling & Utilities
+schedule>=1.2.0
+pytz>=2023.3
+datetime>=5.4.0

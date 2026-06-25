@@ -1,0 +1,54 @@
+name: Daily Stock Screening Pipeline
+
+on:
+  schedule:
+    # Run at 6:00 AM ET (10:00 UTC during EST, 11:00 UTC during EDT)
+    # Adjust based on your timezone. This runs Mon-Fri before market open.
+    - cron: '0 10 * * 1-5'   # 6:00 AM ET (EST) / 5:00 AM ET (EDT)
+  
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  screen-market:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install yfinance pandas numpy requests fpdf2 python-dotenv
+    
+    - name: Run Daily Stock Screening
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+      run: |
+        python src/pipeline.py
+    
+    - name: Upload Reports as Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: daily-picks-report
+        path: reports/
+        retention-days: 90
+    
+    - name: Send Notification (Optional)
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ Pipeline completed successfully!"
+        else
+          echo "❌ Pipeline failed!"
+        fi
