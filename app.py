@@ -103,27 +103,34 @@ def get_score_color(score: float) -> str:
         return "score-low"
 
 def format_market_cap_nse(cap) -> str:
-    cap = cap or 0
-    crore = cap / 10_000_000
-    if crore >= 100_000:
-        return f"\u20B9{crore/100_000:.2f} Lakh Cr"
-    elif crore >= 1_000:
-        return f"\u20B9{crore/1_000:.2f}K Cr"
-    elif crore >= 1:
-        return f"\u20B9{crore:.2f} Cr"
-    else:
-        lakh = cap / 100_000
-        return f"\u20B9{lakh:.2f} Lakh"
+    try:
+        cap = float(cap) if cap else 0.0
+        crore = cap / 10_000_000
+        if crore >= 100_000:
+            return f"\u20B9{crore/100_000:.2f} Lakh Cr"
+        elif crore >= 1_000:
+            return f"\u20B9{crore/1_000:.2f}K Cr"
+        elif crore >= 1:
+            return f"\u20B9{crore:.2f} Cr"
+        else:
+            lakh = cap / 100_000
+            return f"\u20B9{lakh:.2f} Lakh"
+    except (TypeError, ValueError):
+        return "N/A"
 
-def format_volume_nse(vol: float) -> str:
-    if vol >= 100_000_000:
-        return f"{vol/100_000_000:.2f} Cr"
-    elif vol >= 1_000_000:
-        return f"{vol/1_000_000:.2f} L"
-    elif vol >= 1_000:
-        return f"{vol/1_000:.1f}K"
-    else:
-        return str(int(vol))
+def format_volume_nse(vol) -> str:
+    try:
+        vol = float(vol) if vol else 0.0
+        if vol >= 100_000_000:
+            return f"{vol/100_000_000:.2f} Cr"
+        elif vol >= 1_000_000:
+            return f"{vol/1_000_000:.2f} L"
+        elif vol >= 1_000:
+            return f"{vol/1_000:.1f}K"
+        else:
+            return str(int(vol))
+    except (TypeError, ValueError):
+        return "N/A"
 
 @st.cache_data(ttl=300)
 def get_cached_picks() -> list:
@@ -248,10 +255,18 @@ def render_pick_card(pick: dict, rank: int):
         with col2:
             st.subheader(":clipboard: Key Metrics")
             market_cap_val = pick.get("market_cap")
+            pe_val = pick.get("pe_ratio", "N/A")
+            if pe_val is None or pe_val == "N/A":
+                pe_display = "N/A"
+            else:
+                try:
+                    pe_display = f"{float(pe_val):.2f}"
+                except (TypeError, ValueError):
+                    pe_display = "N/A"
             metrics = {
                 "Sector": rationale.get("sector", pick.get("sector", "N/A")),
                 "Market Cap": rationale.get("market_cap_formatted", format_market_cap_nse(market_cap_val)),
-                "P/E Ratio": f"{pick.get('pe_ratio', 'N/A'):.2f}" if isinstance(pick.get('pe_ratio', 'N/A'), (int, float)) else pick.get('pe_ratio', 'N/A'),
+                "P/E Ratio": pe_display,
                 "Volume": format_volume_nse(pick.get("volume", 0)),
                 "Avg Vol (90d)": format_volume_nse(pick.get("avg_volume_90d", 0)),
                 "Vol Ratio (20d)": f"{pick.get('volume_ratio_20d', 1):.2f}x",
