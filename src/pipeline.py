@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.screener import MarketScreener
 from src.database import PickDatabase
-from src.config import FINNHUB_API_KEY, FMP_API_KEY, DEFAULT_UNIVERSE
+from src.config import FINNHUB_API_KEY, FMP_API_KEY, NSE_UNIVERSE
 
 logging.basicConfig(
     level=logging.INFO,

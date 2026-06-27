@@ -339,7 +339,7 @@ def render_download_section():
                 st.download_button(label=":green_book: Download PDF", data=pdf_output, file_name=f"nse_top10_{date.today()}.pdf", mime="application/pdf", use_container_width=True)
 
     with col3:
-        from src.database import ReportGenerator
+        from src.pipeline import ReportGenerator
         json_report = ReportGenerator.generate_json_report(picks)
         st.download_button(label=":card_index: Download JSON", data=json_report, file_name=f"nse_picks_{date.today()}.json", mime="application/json", use_container_width=True)
 
