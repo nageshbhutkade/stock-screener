@@ -1,3 +1,50 @@
+def _normalize_pick_keys(pick: dict) -> dict:
+    """Normalize keys from DB flat columns OR screener nested 'rationale' dict.
+    Ensures dashboard always sees 'entry_suggestion', 'stop_loss', 'target_price'
+    and nested rationale keys regardless of data source."""
+    import math  # Optional, already imported globally
+    rationale = pick.get("rationale", {})
+
+    # If pick came from Supabase (flat columns), build missing rationale keys
+    if not rationale or not rationale.get("entry_suggestion"):
+        if pick.get("entry_suggestion"):
+            rationale = dict(rationale)  # copy
+            rationale["entry_suggestion"] = rationale.get("entry_suggestion") or pick.get("entry_suggestion", "")
+            rationale["stop_loss"] = rationale.get("stop_loss") or _safe_float(pick.get("stop_loss", 0))
+            rationale["target_price"] = rationale.get("target_price") or _safe_float(pick.get("target_price", 0))
+            rationale["suggested_stop_loss"] = _safe_float(pick.get("stop_loss", 0))
+            rationale["suggested_target"] = _safe_float(pick.get("target_price", 0))
+            rationale["risk_level"] = pick.get("risk_level", "Moderate")
+            rationale["bullish_reasons"] = pick.get("bullish_reasons", [])
+            rationale["sector"] = pick.get("sector", "N/A")
+            rationale["entry_price"] = _safe_float(pick.get("current_price", 0))
+
+    # Fallback for completely missing values
+    if not rationale:
+        rationale = {}
+    rationale.setdefault("entry_suggestion", "N/A")
+    rationale.setdefault("suggested_stop_loss", 0.0)
+    rationale.setdefault("suggested_target", 0.0)
+    rationale.setdefault("risk_level", "Moderate")
+    rationale.setdefault("bullish_reasons", [])
+    rationale.setdefault("sector", "N/A")
+    rationale.setdefault("score_breakdown", "")
+    rationale.setdefault("entry_price", _safe_float(pick.get("current_price", 0)))
+    
+    pick["rationale"] = rationale
+    return pick
+
+
+def _safe_float(value, default=0.0):
+    """Convert None/NaN/inf to a safe float."""
+    import math as _math
+    try:
+        result = float(value)
+        if _math.isnan(result) or _math.isinf(result):
+            return default
+        return result
+    except (TypeError, ValueError):
+        return default
 """
 Streamlit Dashboard — Daily Top 10 NSE Stock Picks
 ====================================================
@@ -176,11 +223,10 @@ def render_header():
                     st.error("Pipeline failed. Check logs.")
 
 def render_pick_card(pick: dict, rank: int):
-    score = pick.get("score", 0)
+    pick = _normalize_pick_keys(pick)  # Handles both DB and screener formats
+    score = _safe_float(pick.get("score", 0))
     score_color = get_score_color(score)
     rationale = pick.get("rationale", {})
-    if not rationale and "entry_suggestion" in pick:
-        rationale = pick
     risk = rationale.get("risk_level", "Moderate")
     card_class = "card"
     if risk == "Higher Risk":
@@ -217,14 +263,25 @@ def render_pick_card(pick: dict, rank: int):
             st.markdown("---")
             entry_cols = st.columns(3)
             with entry_cols[0]:
-                st.metric("Entry Strategy", rationale.get("entry_suggestion", "Market Open"))
+                entry_strat = rationale.get("entry_suggestion", "Market Open")
+                entry_price = _safe_float(rationale.get("entry_price", pick.get("current_price", 0)))
+                st.metric("Entry Strategy", entry_strat)
+                if entry_price > 0:
+                    st.caption(f"Entry Price: \u20B9{entry_price:.2f}")
             with entry_cols[1]:
-                sl_val = rationale.get("suggested_stop_loss", 0)
-                pct_down = ((pick.get('current_price', 0) - sl_val) / pick.get('current_price', 1) * 100) if pick.get('current_price', 0) > 0 else 0
+                cur_px = _safe_float(pick.get("current_price", 0))
+                sl_val = _safe_float(rationale.get("suggested_stop_loss", rationale.get("stop_loss", 0)))
+                if cur_px > 0 and sl_val > 0:
+                    pct_down = ((cur_px - sl_val) / cur_px) * 100
+                else:
+                    pct_down = 3.0
                 st.metric("Suggested Stop Loss", f"\u20B9{sl_val:.2f}", delta=f"-{pct_down:.1f}%")
             with entry_cols[2]:
-                tgt_val = rationale.get("suggested_target", 0)
-                pct_up = ((tgt_val - pick.get('current_price', 0)) / pick.get('current_price', 1) * 100) if pick.get('current_price', 0) > 0 else 0
+                tgt_val = _safe_float(rationale.get("suggested_target", rationale.get("target_price", 0)))
+                if cur_px > 0 and tgt_val > 0:
+                    pct_up = ((tgt_val - cur_px) / cur_px) * 100
+                else:
+                    pct_up = 3.0
                 st.metric("Target Price", f"\u20B9{tgt_val:.2f}", delta=f"+{pct_up:.1f}%")
             st.markdown("**Score Components:**")
             st.markdown(rationale.get("score_breakdown", ""))

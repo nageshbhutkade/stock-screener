@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 import logging
 import time
+import math
 
 from src.config import (
     NSE_UNIVERSE, get_yfinance_ticker, WEIGHTS,
@@ -29,6 +30,38 @@ from src.config import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# ─── SAFETY UTILITIES ───────────────────────────────────────
+
+def _safe_float(value, default=0.0):
+    """Convert any value to a safe float, never returning NaN or inf."""
+    try:
+        result = float(value)
+        if math.isnan(result) or math.isinf(result):
+            return default
+        return result
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_round(value, ndigits=2, default=0.0):
+    """Round a number safely, handling NaN/inf/None."""
+    val = _safe_float(value, default)
+    return round(val, ndigits)
+
+
+def _clean_for_json(obj):
+    """Recursively replace NaN/inf with safe values in a dict/list."""
+    if isinstance(obj, dict):
+        return {k: _clean_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_clean_for_json(v) for v in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0.0
+        return obj
+    return obj
 
 
 class TechnicalAnalyzer:
@@ -381,7 +414,7 @@ class MarketScreener:
         self.scorer = StockScorer()
         self.results = []
     
-    def _fetch_stock_data(self, ticker: str) -> Optional[Tuple[pd.DataFrame, Dict]]:
+        def _fetch_stock_data(self, ticker: str) -> Optional[Tuple[pd.DataFrame, Dict]]:
         """
         Fetch NSE stock data for a single ticker.
         Uses .NS suffix for yfinance (Yahoo Finance NSE format).
@@ -390,48 +423,60 @@ class MarketScreener:
         try:
             yf_ticker = get_yfinance_ticker(ticker)
             stock = yf.Ticker(yf_ticker)
-            
+
             # Get info
             info = stock.info
-            
+
             # Fast fail for invalid tickers
-            if not info.get("regularMarketPrice") and not info.get("currentPrice"):
+            ltp = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+            if not ltp or ltp <= 0:
                 # Try without .NS suffix as fallback (some stocks work both ways)
                 stock = yf.Ticker(ticker)
                 info = stock.info
-                if not info.get("regularMarketPrice") and not info.get("currentPrice"):
+                ltp = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+                if not ltp or ltp <= 0:
                     return None
+
+            # PRE-MARKET FALLBACK: Use previous close as entry price
+            previous_close = _safe_float(info.get("previousClose", 0))
+            current_price_raw = info.get("currentPrice") or info.get("regularMarketPrice")
+            if current_price_raw and _safe_float(current_price_raw) > 0:
+                current_price = _safe_float(current_price_raw)
+            else:
+                # Before market open: use previous close
+                current_price = previous_close if previous_close > 0 else 0
             
-            # Get price
-            current_price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose", 0)
-            
+            if current_price <= 0:
+                return None
+
             # FILTER: Penny stocks (threshold in INR)
             if current_price < MIN_PRICE:
                 return None
-            
+
             # FILTER: Market cap (in INR)
-            market_cap = info.get("marketCap", 0)
+            market_cap = _safe_float(info.get("marketCap", 0))
             if market_cap < MIN_MARKET_CAP:
                 return None
-            
+
             # FILTER: Volume
-            volume = info.get("volume", 0)
+            volume = _safe_float(info.get("volume", 0))
             if volume < MIN_VOLUME:
                 return None
-            
+
             # Get historical data
             end_date = datetime.now()
             start_date = end_date - timedelta(days=LOOKBACK_DAYS + 60)  # Extra buffer
             hist = stock.history(start=start_date, end=end_date)
-            
+
             if hist.empty or len(hist) < 20:
                 return None
-            
+
             return hist, info
-            
+
         except Exception as e:
             logger.debug(f"Error fetching NSE {ticker}: {e}")
             return None
+
     
     def screen_market(self) -> List[Dict]:
         """
@@ -453,25 +498,33 @@ class MarketScreener:
             if result is None:
                 continue
             
-            hist, info = result
+                        hist, info = result
             score, breakdown = self.scorer.compute_full_score(hist, info)
+            
+            # Safe price extraction with pre-market fallback
+            prev_close = _safe_float(info.get("previousClose", hist["Close"].iloc[-2] if len(hist) > 1 else hist["Close"].iloc[-1]))
+            ltp = info.get("currentPrice") or info.get("regularMarketPrice")
+            if ltp and _safe_float(ltp) > 0:
+                cur_price = _safe_float(ltp)
+            else:
+                cur_price = prev_close  # Pre-market: use previous close
             
             stock_data = {
                 "ticker": ticker,
                 "company_name": info.get("longName", info.get("shortName", ticker)),
-                "current_price": round(info.get("currentPrice") or info.get("regularMarketPrice") or hist["Close"].iloc[-1], 2),
-                "previous_close": round(info.get("previousClose", hist["Close"].iloc[-2] if len(hist) > 1 else hist["Close"].iloc[-1]), 2),
-                "change_pct": round(info.get("regularMarketChangePercent", 0) or 0, 2),
-                "volume": info.get("volume", 0),
-                "avg_volume_90d": info.get("averageVolume", 0),
-                "market_cap": info.get("marketCap", 0),
+                "current_price": _safe_round(cur_price, 2),
+                "previous_close": _safe_round(prev_close, 2),
+                "change_pct": _safe_round(info.get("regularMarketChangePercent", 0) or 0, 2),
+                "volume": _safe_float(info.get("volume", 0)),
+                "avg_volume_90d": _safe_float(info.get("averageVolume", 0)),
+                "market_cap": _safe_float(info.get("marketCap", 0)),
                 "sector": info.get("sector", "N/A"),
                 "industry": info.get("industry", "N/A"),
-                "pe_ratio": info.get("trailingPE") or info.get("forwardPE") or 0,
-                "score": score,
+                "pe_ratio": _safe_float(info.get("trailingPE") or info.get("forwardPE") or 0),
+                "score": _safe_round(score, 1),
                 "breakdown": breakdown,
-                "rsi": breakdown.get("rsi", 50),
-                "volume_ratio_20d": breakdown.get("volume_ratio", 1.0),
+                "rsi": _safe_round(breakdown.get("rsi", 50), 1, 50.0),
+                "volume_ratio_20d": _safe_round(breakdown.get("volume_ratio", 1.0), 2, 1.0),
                 "technicals": self._get_technical_summary(hist),
             }
             
@@ -580,24 +633,30 @@ class MarketScreener:
         if ts.get("price_pct_20d", 0) > 5:
             reasons.append(f"Strong {ts['price_pct_20d']:.1f}% gain over 20 days")
         
-        # Entry/exit suggestions
+                # Entry/exit suggestions with guaranteed numeric values
         entry_suggestion = "Market open" 
         if stock.get("rsi", 50) < 40:
             entry_suggestion = "Look for dip buy near support"
         elif stock.get("rsi", 50) > 70:
             entry_suggestion = "Wait for pullback to 20-day SMA"
         
-        stop_loss = round(stock["current_price"] * 0.97, 2)
-        target_price = round(stock["current_price"] * 1.03, 2)
+        entry_price = _safe_float(stock.get("current_price", 0))
+        if entry_price <= 0:
+            entry_price = _safe_float(stock.get("previous_close", 100))
+        
+        stop_loss = _safe_round(entry_price * 0.97, 2)
+        target_price = _safe_round(entry_price * 1.03, 2)
         
         return {
             "bullish_reasons": reasons[:4],  # Top 4 reasons
             "entry_suggestion": entry_suggestion,
+            "entry_price": entry_price,
             "suggested_stop_loss": stop_loss,
             "suggested_target": target_price,
             "risk_level": "Moderate" if stock.get("rsi", 50) < 70 else "Higher Risk",
             "sector": stock.get("sector", "N/A"),
-            "market_cap_formatted": self._format_market_cap(stock.get("market_cap", 0)),
+            "market_cap_formatted": self._format_market_cap(_safe_float(stock.get("market_cap", 0))),
+            "market_cap_raw": _safe_float(stock.get("market_cap", 0)),
             "score_breakdown": f"Tech: {tech.get('total_technical', 0):.0f}/65 + Fund: {fund.get('total_fundamental', 0):.0f}/25"
         }
     

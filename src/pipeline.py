@@ -18,6 +18,7 @@ import sys
 import json
 import logging
 import time
+import math
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Optional
 import requests
@@ -147,34 +148,65 @@ class ReportGenerator:
     
     @staticmethod
     def generate_json_report(picks: List[Dict]) -> str:
-        """Generate a JSON-serializable report."""
+        """Generate a JSON-serializable report with NaN/inf safety."""
         report = {
             "date": date.today().isoformat(),
             "generated_at": datetime.now().isoformat(),
-            "total_analyzed": "500+ stocks",
+            "total_analyzed": "300+ NSE stocks",
             "top_picks": []
         }
         
         for i, pick in enumerate(picks, 1):
             r = pick.get("rationale", {})
-            report["top_picks"].append({
+            def sf(v, d=0):
+                try:
+                    f = float(v)
+                    if math.isnan(f) or math.isinf(f):
+                        return d
+                    return f
+                except (TypeError, ValueError):
+                    return d
+
+            pick_entry = {
                 "rank": i,
-                "ticker": pick["ticker"],
-                "company": pick.get("company_name", ""),
-                "price": pick["current_price"],
-                "score": round(pick["score"], 1),
-                "sector": r.get("sector", ""),
-                "market_cap": r.get("market_cap_formatted", ""),
-                "rsi": round(pick.get("rsi", 0), 1),
-                "volume_ratio": round(pick.get("volume_ratio_20d", 0), 2),
-                "entry": r.get("entry_suggestion", ""),
-                "stop_loss": r.get("suggested_stop_loss", 0),
-                "target": r.get("suggested_target", 0),
-                "risk": r.get("risk_level", ""),
-                "reasons": r.get("bullish_reasons", []),
-                "pe_ratio": pick.get("pe_ratio", 0),
-            })
-        
+                "ticker": pick.get("ticker", ""),
+                "company_name": pick.get("company_name", ""),
+                "current_price": sf(pick.get("current_price", 0)),
+                "previous_close": sf(pick.get("previous_close", 0)),
+                "change_pct": sf(pick.get("change_pct", 0)),
+                "volume": int(sf(pick.get("volume", 0))),
+                "avg_volume_90d": int(sf(pick.get("avg_volume_90d", 0))),
+                "market_cap": int(sf(pick.get("market_cap", 0))),
+                "sector": r.get("sector") or pick.get("sector", "N/A"),
+                "industry": pick.get("industry", "N/A"),
+                "pe_ratio": sf(pick.get("pe_ratio", 0)),
+                "score": sf(pick.get("score", 0)),
+                "rsi": sf(pick.get("rsi", 50), 50),
+                "volume_ratio_20d": sf(pick.get("volume_ratio_20d", 1.0), 1.0),
+                # Flat columns for DB-like access from dashboard
+                "entry_suggestion": r.get("entry_suggestion", ""),
+                "stop_loss": sf(r.get("suggested_stop_loss", 0)),
+                "target_price": sf(r.get("suggested_target", 0)),
+                "risk_level": r.get("risk_level", "Moderate"),
+                "bullish_reasons": r.get("bullish_reasons", []),
+                # Nested rationale for dashboard reports
+                "rationale": {
+                    "entry_suggestion": r.get("entry_suggestion", ""),
+                    "entry_price": sf(r.get("entry_price", pick.get("current_price", 0))),
+                    "suggested_stop_loss": sf(r.get("suggested_stop_loss", 0)),
+                    "suggested_target": sf(r.get("suggested_target", 0)),
+                    "stop_loss": sf(r.get("stop_loss", r.get("suggested_stop_loss", 0))),
+                    "target_price": sf(r.get("target_price", r.get("suggested_target", 0))),
+                    "risk_level": r.get("risk_level", "Moderate"),
+                    "bullish_reasons": r.get("bullish_reasons", []),
+                    "sector": r.get("sector") or pick.get("sector", "N/A"),
+                    "market_cap_formatted": r.get("market_cap_formatted", ""),
+                    "market_cap_raw": sf(r.get("market_cap_raw", 0)),
+                    "score_breakdown": r.get("score_breakdown", ""),
+                }
+            }
+            report["top_picks"].append(pick_entry)
+
         return json.dumps(report, indent=2)
 
 

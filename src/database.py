@@ -70,6 +70,7 @@ CREATE TABLE stock_history (
 
 import os
 import logging
+import math
 from datetime import datetime, date
 from typing import List, Dict, Optional
 from supabase import create_client, Client
@@ -77,6 +78,17 @@ from supabase import create_client, Client
 from src.config import SUPABASE_URL, SUPABASE_SERVICE_KEY
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_db_float(value, default=0.0):
+    """Ensure a value is safe for database insertion (no NaN/inf)."""
+    try:
+        result = float(value)
+        if math.isnan(result) or math.isinf(result):
+            return default
+        return result
+    except (TypeError, ValueError):
+        return default
 
 
 class PickDatabase:
@@ -138,31 +150,38 @@ class PickDatabase:
             # Insert each pick
             for rank, pick in enumerate(picks, 1):
                 rationale = pick.get("rationale", {})
+                # Deduplicate: read from rationale OR pick (for DB reads)
+                entry_sugg = rationale.get("entry_suggestion") or pick.get("entry_suggestion", "")
+                stop_loss = _safe_db_float(rationale.get("suggested_stop_loss") or pick.get("stop_loss", 0))
+                target_price = _safe_db_float(rationale.get("suggested_target") or pick.get("target_price", 0))
+                bullish_reasons = rationale.get("bullish_reasons") or pick.get("bullish_reasons", [])
+                risk_level = rationale.get("risk_level") or pick.get("risk_level", "Moderate")
+                
                 pick_data = {
                     "daily_pick_id": daily_pick_id,
                     "rank": rank,
-                    "ticker": pick["ticker"],
-                    "company_name": pick.get("company_name", ""),
-                    "current_price": pick.get("current_price", 0),
-                    "previous_close": pick.get("previous_close", 0),
-                    "change_pct": pick.get("change_pct", 0),
-                    "volume": pick.get("volume", 0),
-                    "avg_volume_90d": pick.get("avg_volume_90d", 0),
-                    "market_cap": pick.get("market_cap", 0),
-                    "sector": pick.get("sector", "N/A"),
-                    "industry": pick.get("industry", "N/A"),
-                    "pe_ratio": pick.get("pe_ratio", 0),
-                    "score": pick.get("score", 0),
-                    "rsi": pick.get("rsi", 50),
-                    "volume_ratio_20d": pick.get("volume_ratio_20d", 1.0),
-                    "entry_suggestion": rationale.get("entry_suggestion", ""),
-                    "stop_loss": rationale.get("suggested_stop_loss", 0),
-                    "target_price": rationale.get("suggested_target", 0),
-                    "bullish_reasons": rationale.get("bullish_reasons", []),
-                    "risk_level": rationale.get("risk_level", "Moderate"),
-                    "technical_score": pick.get("breakdown", {}).get("technical", {}).get("total_technical", 0),
-                    "fundamental_score": pick.get("breakdown", {}).get("fundamental", {}).get("total_fundamental", 0),
-                    "sentiment_score": pick.get("sentiment", 0.5) * 10,
+                    "ticker": pick.get("ticker", ""),
+                    "company_name": pick.get("company_name", "")[:255],
+                    "current_price": _safe_db_float(pick.get("current_price", 0)),
+                    "previous_close": _safe_db_float(pick.get("previous_close", 0)),
+                    "change_pct": _safe_db_float(pick.get("change_pct", 0)),
+                    "volume": int(_safe_db_float(pick.get("volume", 0))),
+                    "avg_volume_90d": int(_safe_db_float(pick.get("avg_volume_90d", 0))),
+                    "market_cap": int(_safe_db_float(pick.get("market_cap", 0))),
+                    "sector": pick.get("sector", "N/A")[:100],
+                    "industry": pick.get("industry", "N/A")[:100],
+                    "pe_ratio": _safe_db_float(pick.get("pe_ratio", 0)),
+                    "score": _safe_db_float(pick.get("score", 0)),
+                    "rsi": _safe_db_float(pick.get("rsi", 50), 50.0),
+                    "volume_ratio_20d": _safe_db_float(pick.get("volume_ratio_20d", 1.0), 1.0),
+                    "entry_suggestion": entry_sugg,
+                    "stop_loss": stop_loss,
+                    "target_price": target_price,
+                    "bullish_reasons": bullish_reasons if isinstance(bullish_reasons, list) else [],
+                    "risk_level": risk_level[:20],
+                    "technical_score": _safe_db_float(pick.get("breakdown", {}).get("technical", {}).get("total_technical", 0)),
+                    "fundamental_score": _safe_db_float(pick.get("breakdown", {}).get("fundamental", {}).get("total_fundamental", 0)),
+                    "sentiment_score": _safe_db_float(pick.get("sentiment", 0.5) * 10),
                 }
                 
                 self.client.table("picks") \
