@@ -1,0 +1,41 @@
+"name: Swing Monthly Scanner
+on:
+  schedule:
+    - cron: '30 4 1 * *'  # 1st of every month 10:00 AM IST
+  workflow_dispatch:
+
+jobs:
+  run-swing-monthly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas numpy yfinance supabase streamlit python-dotenv fpdf2
+      - name: Create reports directory
+        run: mkdir -p reports
+      - name: Run Swing Monthly Pipeline
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: |
+          python -c "
+          import sys; sys.path.insert(0, '.')
+          from src.swing_screener import run_swing_pipeline
+          run_swing_pipeline('monthly')
+          "
+      - name: Commit and push JSON results
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add reports/swing_monthly_picks.json
+          git diff --staged --quiet || (git commit -m 'Auto: Monthly swing picks' && git push)
+"

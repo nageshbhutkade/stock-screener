@@ -1,0 +1,49 @@
+We need to apply the suggested edit to the original code. The original code is a GitHub Actions workflow YAML file with some double-quoted strings, escaped quotes, etc. The suggested edit appears to change quoting style: from using escaped double quotes to single quotes, simplify multi-line Python command, and remove some comments. The task: "Apply the SUGGESTED EDIT to the ORIGINAL CODE. Output the complete modified file." We must output only the code, no explanations. So we'll produce the modified YAML file exactly as in the suggested edit, but note that the original had a leading `"`? Actually the ORIGINAL CODE is provided as a code block containing the entire YAML content. The SUGGESTED EDIT is also a code block. The difference: Original uses double-quoted strings with backslashes for escaping (e.g., `"30 4 * * 6"`) and `"` for newlines in python command. The suggested edit uses single quotes for cron, python-version, and the git config names and email, and changes the Python command from a single-line `python -c \" ... \"` to a multi-line command with single quotes and semicolon. Also the commit message format: original had `commit -m "Auto: Weekly swing picks $(date +%Y-%m-%d)"`, suggested edit removes the date substitution and uses single quotes: `commit -m 'Auto: Weekly swing picks'`. The step names: "Commit & push JSON results" changed to "Commit and push JSON results". So I'll output the complete YAML file exactly as the suggested edit.
+
+Make sure to preserve any indentation. Output only the code.```yaml
+name: Swing Weekly Scanner
+
+on:
+  schedule:
+    - cron: '30 4 * * 6'  # Every Saturday 10:00 AM IST
+  workflow_dispatch:
+jobs:
+  run-swing-weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas numpy yfinance supabase streamlit python-dotenv fpdf2
+
+      - name: Create reports directory
+        run: mkdir -p reports
+
+      - name: Run Swing Weekly Pipeline
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: |
+          python -c "
+          import sys; sys.path.insert(0, '.')
+          from src.swing_screener import run_swing_pipeline
+          run_swing_pipeline('weekly')
+          "
+
+      - name: Commit and push JSON results
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add reports/swing_weekly_picks.json
+          git diff --staged --quiet || (git commit -m 'Auto: Weekly swing picks' && git push)
