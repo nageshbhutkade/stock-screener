@@ -413,8 +413,8 @@ class MarketScreener:
     def __init__(self):
         self.scorer = StockScorer()
         self.results = []
-    
-        def _fetch_stock_data(self, ticker: str) -> Optional[Tuple[pd.DataFrame, Dict]]:
+
+    def _fetch_stock_data(self, ticker: str) -> Optional[Tuple[pd.DataFrame, Dict]]:
         """
         Fetch NSE stock data for a single ticker.
         Uses .NS suffix for yfinance (Yahoo Finance NSE format).
@@ -497,8 +497,8 @@ class MarketScreener:
             result = self._fetch_stock_data(ticker)
             if result is None:
                 continue
-            
-                        hist, info = result
+
+            hist, info = result
             score, breakdown = self.scorer.compute_full_score(hist, info)
             
             # Safe price extraction with pre-market fallback
@@ -633,8 +633,8 @@ class MarketScreener:
         if ts.get("price_pct_20d", 0) > 5:
             reasons.append(f"Strong {ts['price_pct_20d']:.1f}% gain over 20 days")
         
-                # Entry/exit suggestions with guaranteed numeric values
-        entry_suggestion = "Market open" 
+        # Entry/exit suggestions with guaranteed numeric values
+        entry_suggestion = "Market open"                
         if stock.get("rsi", 50) < 40:
             entry_suggestion = "Look for dip buy near support"
         elif stock.get("rsi", 50) > 70:

@@ -1,4 +1,4 @@
-"name: Swing Monthly Scanner
+name: Swing Monthly Scanner
 on:
   schedule:
     - cron: '30 4 1 * *'  # 1st of every month 10:00 AM IST
@@ -38,4 +38,3 @@ jobs:
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add reports/swing_monthly_picks.json
           git diff --staged --quiet || (git commit -m 'Auto: Monthly swing picks' && git push)
-"
